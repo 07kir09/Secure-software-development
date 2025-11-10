@@ -1,0 +1,158 @@
+@startuml BusinessLevel
+skinparam shadowing false
+skinparam linetype ortho
+
+actor "Product Manager\n(Бизнес-пользователь)" as PM
+
+rectangle "Trust Boundary: Edge" as Edge {
+  node "Customer Portal /\nReverse Proxy" as GW
+}
+
+rectangle "Trust Boundary: Core" as Core {
+  component "Backlog Service\n(FastAPI)" as APP
+}
+
+rectangle "Trust Boundary: Data" as Data {
+  database "Backlog DB" as STORE
+  collections "Security Lake" as AUDIT
+}
+
+note right of Core
+  Бизнес-логика:
+  * Валидация входного payload (Pydantic их схемы)
+  * Назначение ID, обновление статуса, проверка правил
+  * Формирование понятных пользователю ответов/ошибок
+end note
+
+PM -down-> GW : "F1\nБизнес-операции:\nсоздать/обновить задачу"
+GW --> APP : "F2\nАвторизованный запрос"
+APP --> STORE : "F3\nCRUD записи"
+APP --> AUDIT : "F4\nАудит событий"
+APP --> GW : "F5\nJSON-ответ"
+GW --> PM : "F6\nСтатус и отчёт"
+
+note right of PM
+  Клиент → Edge → Core → Data.
+  Каждая граница = отдельный trust zone.
+end note
+@enduml
+
+@startuml TechnicalLevel
+skinparam shadowing false
+skinparam linetype ortho
+skinparam componentStyle rectangle
+
+actor "Browser / API Client" as CLIENT
+
+rectangle "Reverse Proxy / Ingress" as EdgeLayer {
+  component "NGINX / Traefik\nTLS termination + rate limit" as NGINX
+}
+
+rectangle "FastAPI Application" as CoreLayer {
+  component "main.py\nFastAPI routers" as APP
+  component "errors.py\nException handlers" as ERR
+  component "schemas.py\nPydantic models" as SCHEMAS
+  rectangle "In-memory store `_DB`" as STORAGE
+}
+
+rectangle "Persistence & Observability" as DataLayer {
+  database "PostgreSQL" as DB
+  rectangle "Audit Logs\n(JSON Lines / SIEM)" as LOGS
+}
+
+component "CI/CD Pipeline\n(pip-audit, semgrep, pytest)" as CI
+
+CLIENT --> NGINX : "F1\nHTTPS + JWT"
+NGINX --> APP : "F2\nHTTP (internal)"
+APP --> STORAGE : "F3\nCache access"
+APP --> DB : "F4\nCRUD SQL"
+APP --> LOGS : "F5\nStructured events"
+APP ..> ERR : "F6\nException handling"
+APP ..> SCHEMAS : "F7\nPayload validation"
+SCHEMAS ..> DB : "F8\nSchema aligns"
+CI --> APP : "F9\nWebhook F10"
+
+note bottom of DataLayer
+  Data layer хранит состояние системы.
+  Audit logs участвуют в расследованиях инцидентов.
+end note
+
+note right of APP
+  Шаги бизнес-логики:
+  1. Проверить токен/контекст авторизации.
+  2. Валидация и нормализация данных.
+  3. Вызов CRUD-операций (DB/STORAGE).
+  4. Формирование ответа и логирование.
+end note
+
+note right of DB
+  Взаимодействие с данными:
+  * F3 — быстрый доступ к in-memory кэшу.
+  * F4 — устойчивое хранение в PostgreSQL.
+  * Запросы параметризованы, транзакции контролируют целостность.
+end note
+
+@startuml DetailedLifecycle
+skinparam shadowing false
+skinparam sequenceArrowThickness 1.5
+skinparam sequenceParticipant underline
+skinparam sequenceMessageAlign center
+
+actor "Product Manager" as USER
+participant "Reverse Proxy\n(rate limit + TLS)\nF1/F2" as EDGE
+participant "FastAPI App\nmain.py" as API
+participant "Auth Service\n(JWT introspection)" as AUTH
+participant "Pydantic Schemas\nschemas.py" as SCHEMA
+database "Item Store\n(PostgreSQL)" as DB
+collections "Audit Logs\nSecurity Lake" as LOGS
+participant "Monitoring\nAPM/Alerts" as MON
+
+== Happy Path: Create Item ==
+USER -> EDGE : HTTPS POST /items\n(JSON payload)
+EDGE -> API : Forward + request headers
+API -> AUTH : Validate Bearer token
+AUTH --> API : Claims (user_id, scopes)
+API -> SCHEMA : Validate payload\n(name, status,…)
+SCHEMA --> API : Valid item data
+API -> DB : INSERT item (transaction)
+DB --> API : Created row + ID
+API -> LOGS : Write audit event\n{user_id, action=create, item_id}
+API -> MON : Emit metric (latency)
+API --> EDGE : 201 Created + JSON
+EDGE --> USER : Response
+
+== Alternate: Validation Error ==
+USER -> EDGE : POST /items (invalid status)
+EDGE -> API : Forward request
+API -> AUTH : Validate token
+AUTH --> API : Claims ok
+API -> SCHEMA : Validate payload
+SCHEMA --> API : ValidationError(reason)
+API -> LOGS : Audit failed attempt
+API -> MON : Increment validation_error counter
+API --> EDGE : 422 + error JSON
+EDGE --> USER : 422 response
+
+== Alternate: Unauthorized ==
+USER -> EDGE : POST /items (no token)
+EDGE -> API : Forward request
+API -> AUTH : Token introspection
+AUTH --> API : Unauthorized
+API -> MON : Increment auth_fail counter
+API --> EDGE : 401 Unauthorized
+EDGE --> USER : 401 response
+
+== Scheduled Backups ==
+MON -> DB : Trigger snapshot (nightly)
+DB --> MON : Snapshot success
+MON -> LOGS : Record compliance event
+
+note bottom
+  Диаграмма охватывает ключевые сценарии:
+  1. Успешное создание айтема (потоки F1–F7).
+  2. Ошибка валидации (срабатывание контролей NFR-S09).
+  3. Ошибка авторизации (контроль NFR-S01).
+  4. Сервисные процессы: метрики, бэкапы.
+end note
+@enduml
+@enduml
