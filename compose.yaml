@@ -3,12 +3,12 @@ services:
     build:
       context: .
       target: runtime
-    image: secdev-course-app
+    image: ${APP_IMAGE:-secdev-course-app}
     environment:
-      APP_API_TOKEN: dev-secret-change-me
-      DATABASE_URL: postgresql+psycopg://app:app@db:5432/app
-      CACHE_URL: redis://cache:6379/0
-      BROKER_URL: amqp://app:app@queue:5672/app
+      APP_API_TOKEN: ${APP_API_TOKEN:-dev-secret-change-me}
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://app:app@db:5432/app}
+      CACHE_URL: ${CACHE_URL:-redis://cache:6379/0}
+      BROKER_URL: ${BROKER_URL:-amqp://app:app@queue:5672/app}
     depends_on:
       db:
         condition: service_healthy
