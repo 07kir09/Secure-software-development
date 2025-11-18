@@ -32,6 +32,7 @@ profile secdev-course-app flags=(attach_disconnected,mediate_deleted) {
   /usr/lib64/** mr,
   /usr/local/lib/** mr,
   /opt/venv/lib/** mr,
+  /opt/venv/pyvenv.cfg r,
 
   capability net_bind_service,
 
