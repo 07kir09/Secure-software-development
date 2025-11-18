@@ -1,0 +1,45 @@
+#include <tunables/global>
+
+profile secdev-course-app flags=(attach_disconnected,mediate_deleted) {
+  #include <abstractions/base>
+  #include <abstractions/nameservice>
+
+  network inet,
+  network inet6,
+
+  deny @{PROC}/sysrq-trigger rwklx,
+  deny @{PROC}/mem rwklx,
+  deny @{PROC}/kcore rwklx,
+  deny @{PROC}/kmsg rwklx,
+
+  /usr/bin/python3.11 rix,
+  /usr/bin/python3 rix,
+  /opt/venv/bin/python3.11 rix,
+  /opt/venv/bin/uvicorn rix,
+  /opt/venv/bin/uvicorn* rix,
+
+  /app/ r,
+  /app/** rw,
+  /tmp/ rw,
+  /tmp/** rwk,
+  /proc/** r,
+  /dev/null rw,
+  /dev/urandom r,
+
+  /lib/** mr,
+  /lib64/** mr,
+  /usr/lib/** mr,
+  /usr/lib64/** mr,
+  /usr/local/lib/** mr,
+  /opt/venv/lib/** mr,
+  /opt/venv/pyvenv.cfg r,
+
+  capability net_bind_service,
+
+  signal (send,receive) peer=unconfined,
+
+  ptrace (trace,readby) peer=unconfined,
+
+  umount,
+  mount,
+}

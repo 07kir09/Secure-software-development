@@ -1,8 +1,78 @@
 services:
   app:
-    build: .
+    build:
+      context: .
+      target: runtime
+    image: ${APP_IMAGE:-secdev-course-app}
+    environment:
+      APP_API_TOKEN: ${APP_API_TOKEN:-dev-secret-change-me}
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://app:app@db:5432/app}
+      CACHE_URL: ${CACHE_URL:-redis://cache:6379/0}
+      BROKER_URL: ${BROKER_URL:-amqp://app:app@queue:5672/app}
+    depends_on:
+      db:
+        condition: service_healthy
+      cache:
+        condition: service_healthy
+      queue:
+        condition: service_healthy
     ports:
       - "8000:8000"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+      - seccomp:./deploy/security/seccomp/uvicorn-fastapi.json
+      - apparmor:secdev-course-app
+    restart: unless-stopped
+
+  db:
+    image: postgres:15-alpine
     environment:
-      - PYTHONUNBUFFERED=1
-    profiles: ["dev"]
+      POSTGRES_DB: app
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -d $${POSTGRES_DB} -U $${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  cache:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    volumes:
+      - cache-data:/data
+    restart: unless-stopped
+
+  queue:
+    image: rabbitmq:3.12-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: app
+      RABBITMQ_DEFAULT_PASS: app
+      RABBITMQ_DEFAULT_VHOST: app
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "15672:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    restart: unless-stopped
+
+volumes:
+  db-data:
+  cache-data:
+  rabbitmq-data:

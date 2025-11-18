@@ -31,16 +31,25 @@ Badge добавится автоматически после загрузки 
 
 ## Контейнеры
 ```bash
-docker build -t secdev-app .
-docker run --rm -p 8000:8000 secdev-app
-# или
+# production-like image
+docker build --target runtime -t secdev-course-app .
+docker run --rm -p 8000:8000 \
+  -e APP_API_TOKEN=local-token \
+  secdev-course-app
+
+# полный стек: приложение + PostgreSQL
 docker compose up --build
 ```
 
+`docker compose` разворачивает приложение и Postgres 15 с `DATABASE_URL` и dev-токеном.
+Контейнер приложения запускается как non-root, с отрубленными capabilities,
+read-only rootfs и HEALTHCHECK на `/health`.
+
 ## Логика проекта
 Приложение моделирует простой бэклог учебного проекта: можно добавлять задачи, менять их
-статус (`draft` → `in_progress` → `done`) и удалять ненужные элементы. Память — временная
-(`in-memory`), что достаточно для учебного стенда и автоматических тестов.
+статус (`draft` → `in_progress` → `done`) и удалять ненужные элементы. По умолчанию данные
+хранятся в SQLite (`app.db`), но при запуске через `docker compose` используется PostgreSQL
+(`DATABASE_URL=postgresql+psycopg://...`).
 
 ## Эндпойнты
 - `GET /health` → `{"status": "ok"}`

@@ -6,13 +6,13 @@ from fastapi.exceptions import RequestValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.db import get_session, init_db, reset_database
 from app.errors import (
     ApiError,
     api_error_handler,
     http_exception_handler,
     validation_exception_handler,
 )
-from app.db import get_session, init_db, reset_database
 from app.models import Item as ItemModel
 from app.schemas import ALLOWED_STATUSES, Item, ItemCreate, ItemUpdate
 

@@ -34,3 +34,10 @@
 - Ошибочные запросы (например, пустой PATCH) по-прежнему возвращают стандартный problem-details (`app/main.py:147`, `tests/test_items.py:67`).
 - Настройка CI и правила качества остались прежними.
 - Добавлены модуль `app/db.py` и модель `Item`, а все CRUD-операции используют сессии (`app/db.py:32`, `app/main.py:94`).
+
+## P06 — CI/CD и релизные артефакты
+- Матрица `qa-matrix` прогоняет линтеры и pytest на Ubuntu и macOS с Python 3.11/3.12, а остальные job-ы завязаны через `needs`, поэтому проверки и публикация артефактов выполняются параллельно под свой стек (`.github/workflows/ci.yml:23-185`).
+- Кэш зависимостей привязан к `requirements*.txt` и `pyproject.toml`, а Docker слой кешируется через BuildKit (`cache: pip`, `cache-from/cache-to`) — это сокращает время как для питоновых степов, так и для сборки образа (`.github/workflows/ci.yml:38-46`, `.github/workflows/ci.yml:175-184`).
+- Секреты и переменные окружения берутся из `secrets.*` и `vars.*` с разными значениями для CI/stage (`APP_API_TOKEN`, `DATABASE_URL`, `CACHE_URL`, `BROKER_URL`), поэтому dev/stage/prod разделены и нет утечек (`.github/workflows/ci.yml:32-35`, `.github/workflows/ci.yml:190-195`).
+- Job `quality-reports` готовит HTML coverage, XML-репорты pytest/coverage и загружает их артефактами для релиза или анализа регрессий (`.github/workflows/ci.yml:65-107`).
+- Сборка python wheel и Docker-образа создаёт релевантные артефакты (`python-package`, `docker-image`), а `staging-smoke` вытягивает тот же тег из GHCR и прогоняет smoke-тест Compose-стека перед релизом (`.github/workflows/ci.yml:109-227`).

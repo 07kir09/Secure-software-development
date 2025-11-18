@@ -1,0 +1,63 @@
+###############################
+# Dependency layer
+###############################
+FROM python:3.11-slim AS deps
+
+ENV VIRTUAL_ENV=/opt/venv \
+    PATH="/opt/venv/bin:$PATH"
+
+WORKDIR /app
+
+RUN python -m venv "$VIRTUAL_ENV"
+
+COPY requirements.txt ./
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir -r requirements.txt
+
+
+###############################
+# Test/build layer
+###############################
+FROM deps AS test
+
+COPY requirements-dev.txt ./
+RUN pip install --no-cache-dir -r requirements-dev.txt
+
+COPY . .
+
+# Provide dummy API token for integration tests
+ENV APP_API_TOKEN=test-token
+
+RUN pytest -q
+
+
+###############################
+# Runtime layer
+###############################
+FROM python:3.11-slim AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    VIRTUAL_ENV=/opt/venv \
+    PATH="/opt/venv/bin:$PATH"
+
+WORKDIR /app
+
+# Create non-root user
+RUN groupadd --system appuser \
+    && useradd --system --create-home --gid appuser --shell /usr/sbin/nologin appuser
+
+COPY --from=deps /opt/venv /opt/venv
+
+# Copy only runtime artifacts
+COPY --chown=appuser:appuser app ./app
+
+RUN chown -R appuser:appuser /app
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 CMD ["python", "-c", "import sys, urllib.request; req = urllib.request.Request('http://localhost:8000/health'); req.add_header('User-Agent', 'healthcheck'); sys.exit(0 if urllib.request.urlopen(req, timeout=2).status == 200 else 1)"]
+
+USER appuser
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
