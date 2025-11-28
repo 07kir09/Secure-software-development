@@ -43,7 +43,7 @@ jobs:
             -v "${{ github.workspace }}:/work" \
             -w /work \
             "${{ env.SYFT_IMAGE }}" \
-            packages dir:. -o cyclonedx-json -q > "${{ env.SBOM_PATH }}"
+            packages dir:. -o cyclonedx-json@1.5 -q > "${{ env.SBOM_PATH }}"
 
       - name: Run SCA scan (Grype)
         run: |
