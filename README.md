@@ -29,7 +29,7 @@ pytest -q
 В репозитории настроен workflow **CI** (GitHub Actions) — required check для `main`.
 Badge добавится автоматически после загрузки шаблона в GitHub.
 
-Security workflow **Security - SBOM & SCA** генерирует SBOM (Syft 1.16.0, CycloneDX) и запускает SCA (Grype 0.77.0) на push/pull_request/workflow_dispatch. Артефакты складываются в `EVIDENCE/P09/` (`sbom.json`, `sca_report.json`, `sca_summary.md`) и публикуются как artifacts; вейверы ведутся в `policy/waivers.yml`.
+Security workflow **Security - SBOM & SCA** генерирует SBOM (Syft v1.16.0, CycloneDX) и запускает SCA (Grype v0.77.0) на push/pull_request/workflow_dispatch. Артефакты складываются в `EVIDENCE/P09/` (`sbom.json`, `sca_report.json`, `sca_summary.md`) и публикуются как artifacts; вейверы ведутся в `policy/waivers.yml`.
 
 ## Контейнеры
 ```bash

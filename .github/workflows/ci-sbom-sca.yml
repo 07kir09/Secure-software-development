@@ -26,8 +26,8 @@ jobs:
     name: Generate SBOM and run SCA
     runs-on: ubuntu-latest
     env:
-      SYFT_IMAGE: anchore/syft:1.16.0
-      GRYPE_IMAGE: anchore/grype:0.77.0
+      SYFT_IMAGE: anchore/syft:v1.16.0
+      GRYPE_IMAGE: anchore/grype:v0.77.0
       SBOM_PATH: EVIDENCE/P09/sbom.json
       SCA_REPORT_PATH: EVIDENCE/P09/sca_report.json
       SCA_SUMMARY_PATH: EVIDENCE/P09/sca_summary.md
