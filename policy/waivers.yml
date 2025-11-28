@@ -1,0 +1,20 @@
+# Waiver policy template for SCA findings.
+version: 1
+owner: "@security-champion"
+review_cadence: "30d"
+
+waivers:
+  - id: SAMPLE-2025-0001
+    package: example-package
+    ecosystem: pypi
+    cve: CVE-2024-99999
+    introduced_in: requirements.txt
+    severity: high
+    status: draft
+    reason: >
+      Placeholder waiver to illustrate the required format. Replace with a real
+      vulnerability ID from SCA results if remediation is not yet possible.
+    mitigation_plan: "Plan upgrade when a patched release is available; reassess monthly."
+    expires: 2025-03-31
+    issue: https://github.com/example/repo/issues/1
+    approved_by: "@security-champion"

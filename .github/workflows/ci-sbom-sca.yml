@@ -1,0 +1,99 @@
+name: Security - SBOM & SCA
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "requirements*.txt"
+      - "**/*.py"
+      - ".github/workflows/ci-sbom-sca.yml"
+  pull_request:
+    paths:
+      - "requirements*.txt"
+      - "**/*.py"
+      - ".github/workflows/ci-sbom-sca.yml"
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: sbom-sca-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sbom-sca:
+    name: Generate SBOM and run SCA
+    runs-on: ubuntu-latest
+    env:
+      SYFT_IMAGE: anchore/syft:v1.16.0
+      GRYPE_IMAGE: anchore/grype:v0.77.0
+      SBOM_PATH: EVIDENCE/P09/sbom.json
+      SCA_REPORT_PATH: EVIDENCE/P09/sca_report.json
+      SCA_SUMMARY_PATH: EVIDENCE/P09/sca_summary.md
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare evidence directory
+        run: mkdir -p EVIDENCE/P09
+
+      - name: Generate SBOM (Syft CycloneDX)
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/work" \
+            -w /work \
+            "${{ env.SYFT_IMAGE }}" \
+            packages dir:. -o cyclonedx-json@1.5 -q > "${{ env.SBOM_PATH }}"
+
+      - name: Run SCA scan (Grype)
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/work" \
+            -w /work \
+            "${{ env.GRYPE_IMAGE }}" \
+            sbom:/work/${{ env.SBOM_PATH }} -o json -q > "${{ env.SCA_REPORT_PATH }}"
+
+      - name: Build SCA summary
+        run: |
+          python - <<'PY'
+          import json
+          from collections import Counter
+          from pathlib import Path
+
+          report_path = Path("${{ env.SCA_REPORT_PATH }}")
+          summary_path = Path("${{ env.SCA_SUMMARY_PATH }}")
+          summary_path.parent.mkdir(parents=True, exist_ok=True)
+
+          data = json.loads(report_path.read_text() or "{}")
+          severities = Counter(
+              (match.get("vulnerability") or {}).get("severity")
+              for match in data.get("matches", [])
+              if (match.get("vulnerability") or {}).get("severity")
+          )
+
+          lines = ["# SCA summary", ""]
+          if severities:
+              lines.append("Counts by severity:")
+              for level in ("Critical", "High", "Medium", "Low", "Negligible", "Unknown"):
+                  if level in severities:
+                      lines.append(f"- {level}: {severities[level]}")
+          else:
+              lines.append("No vulnerabilities detected by Grype.")
+          lines.extend(
+              [
+                  "",
+                  "Review Critical/High findings; plan upgrades or justified waivers in policy/waivers.yml.",
+              ]
+          )
+          summary_path.write_text("\n".join(lines))
+          PY
+
+      - name: Upload SBOM & SCA artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-sca-artifacts
+          path: |
+            ${{ env.SBOM_PATH }}
+            ${{ env.SCA_REPORT_PATH }}
+            ${{ env.SCA_SUMMARY_PATH }}
+          if-no-files-found: error
