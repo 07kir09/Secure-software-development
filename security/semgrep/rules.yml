@@ -1,0 +1,32 @@
+rules:
+  - id: fastapi-item-mutations-require-auth
+    message: >
+      Mutating item routes must enforce API token verification via
+      Depends(require_api_token).
+    severity: WARNING
+    languages: [python]
+    patterns:
+      - pattern: |
+          @app.$METHOD($ROUTE, ...)
+          def $FUNC(...):
+              ...
+      - metavariable-regex:
+          metavariable: $METHOD
+          regex: "(post|put|delete|patch)"
+      - metavariable-regex:
+          metavariable: $ROUTE
+          regex: "^\"/items"
+      - pattern-not: |
+          def $FUNC(..., $AUTH: $TYPE = Depends(require_api_token), ...):
+              ...
+      - pattern-not: |
+          def $FUNC(..., $AUTH = Depends(require_api_token), ...):
+              ...
+    metadata:
+      category: security
+      cwe: "CWE-287: Improper Authentication"
+      references:
+        - https://fastapi.tiangolo.com/
+      justification: >
+        This project protects write operations with an API token; missing the
+        dependency weakens access control on backlog modifications.

@@ -1,0 +1,21 @@
+title = "Course project Gitleaks config"
+description = "Base secrets scanning with allowlist for known test fixtures."
+
+[[rules]]
+id = "generic-api-key"
+description = "Generic API key or token"
+regex = '''(?i)(api|token|secret|key)[^\n]{0,20}['"][0-9a-zA-Z_-]{10,}['"]'''
+tags = ["key", "generic", "api"]
+entropy = 3.8
+
+[[rules]]
+id = "rsa-private-key"
+description = "RSA private key block"
+regex = '''-----BEGIN RSA PRIVATE KEY-----'''
+tags = ["key", "rsa", "private"]
+
+[allowlist]
+# Tests set a stub token APP_API_TOKEN value; this is not a real secret.
+regexes = [
+  '''test-token'''
+]
