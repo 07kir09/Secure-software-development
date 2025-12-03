@@ -34,3 +34,10 @@
 - Ошибочные запросы (например, пустой PATCH) по-прежнему возвращают стандартный problem-details (`app/main.py:147`, `tests/test_items.py:67`).
 - Настройка CI и правила качества остались прежними.
 - Добавлены модуль `app/db.py` и модель `Item`, а все CRUD-операции используют сессии (`app/db.py:32`, `app/main.py:94`).
+
+## P10 — SAST и секреты
+- Добавлен workflow `Security - SAST & Secrets`, который на push/pull_request/workflow_dispatch гоняет Semgrep (`p/ci` + `security/semgrep/rules.yml`) и Gitleaks по всему репо и складывает отчёты в `EVIDENCE/P10/` (`.github/workflows/ci-sast-secrets.yml`).
+- Кастомное правило Semgrep ловит мутации `/items*` без `Depends(require_api_token)`, чтобы не потерять обязательную аутентификацию на изменяющих маршрутах (`security/semgrep/rules.yml`).
+- Последний прогон Semgrep не нашёл проблем; SARIF и сводка лежат в `EVIDENCE/P10/semgrep.sarif` и `EVIDENCE/P10/sast_summary.md`.
+- Gitleaks использует базовые правила + allowlist для тестового токена из фикстур (`security/.gitleaks.toml`), поэтому отчёт пустой и без ложных тревог (`EVIDENCE/P10/gitleaks.json`).
+- При появлении реальных findings план: фиксировать критичные сразу, остальное класть в backlog/issue с ссылкой на свежий отчёт.
