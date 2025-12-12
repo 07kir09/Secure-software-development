@@ -1,0 +1,217 @@
+name: Security - DAST (ZAP baseline)
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "app/**"
+      - "compose.yaml"
+      - "Dockerfile"
+      - "requirements*.txt"
+      - ".github/workflows/ci-p11-dast.yml"
+  push:
+    branches: [main]
+    paths:
+      - "app/**"
+      - "compose.yaml"
+      - "Dockerfile"
+      - "requirements*.txt"
+      - ".github/workflows/ci-p11-dast.yml"
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: dast-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  zap-baseline:
+    name: Run OWASP ZAP baseline
+    runs-on: ubuntu-latest
+    env:
+      APP_PORT: 8000
+      TARGET_URL: http://localhost:8000
+      HEALTHCHECK_URL: http://localhost:8000/health
+      EVIDENCE_DIR: EVIDENCE/P11
+      ZAP_HTML: zap_baseline.html
+      ZAP_JSON: zap_baseline.json
+      SUMMARY_FILE: zap_summary.md
+      ZAP_IMAGE: owasp/zap2docker-stable:2.14.0
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare evidence directory
+        run: |
+          mkdir -p "${{ env.EVIDENCE_DIR }}"
+          rm -f \
+            "${{ env.EVIDENCE_DIR }}/${{ env.ZAP_HTML }}" \
+            "${{ env.EVIDENCE_DIR }}/${{ env.ZAP_JSON }}" \
+            "${{ env.EVIDENCE_DIR }}/${{ env.SUMMARY_FILE }}"
+
+      - name: Build & start service (Docker Compose)
+        run: docker compose --profile dev up --build -d app
+        working-directory: ${{ github.workspace }}
+
+      - name: Wait for service health
+        run: |
+          for i in {1..30}; do
+            if curl -fsS "${{ env.HEALTHCHECK_URL }}" > /dev/null; then
+              echo "Service is healthy"
+              exit 0
+            fi
+            echo "Waiting for service to respond..."
+            sleep 2
+          done
+          echo "Service failed to become healthy" >&2
+          docker compose logs app || true
+          exit 1
+        working-directory: ${{ github.workspace }}
+
+      - name: Run ZAP baseline scan
+        id: zap
+        run: |
+          set +e
+          docker run --rm --network host \
+            -v "${{ github.workspace }}/${{ env.EVIDENCE_DIR }}:/zap/wrk:rw" \
+            "${{ env.ZAP_IMAGE }}" \
+            zap-baseline.py \
+            -t "${{ env.TARGET_URL }}" \
+            -m 5 \
+            -I \
+            -r "${{ env.ZAP_HTML }}" \
+            -J "${{ env.ZAP_JSON }}"
+          status=$?
+          echo "zap_exit_code=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Build ZAP summary
+        env:
+          TARGET_URL: ${{ env.TARGET_URL }}
+          EVIDENCE_DIR: ${{ env.EVIDENCE_DIR }}
+          ZAP_HTML: ${{ env.ZAP_HTML }}
+          ZAP_JSON: ${{ env.ZAP_JSON }}
+          SUMMARY_FILE: ${{ env.SUMMARY_FILE }}
+          ZAP_EXIT_CODE: ${{ steps.zap.outputs.zap_exit_code }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from collections import Counter
+          from pathlib import Path
+
+          evidence_dir = Path(os.environ["EVIDENCE_DIR"])
+          json_path = evidence_dir / os.environ["ZAP_JSON"]
+          html_path = evidence_dir / os.environ["ZAP_HTML"]
+          summary_path = evidence_dir / os.environ["SUMMARY_FILE"]
+          target = os.environ.get("TARGET_URL", "").strip() or "n/a"
+          exit_code_raw = os.environ.get("ZAP_EXIT_CODE", "") or "0"
+
+          if not json_path.exists():
+            raise SystemExit(f"ZAP JSON report not found: {json_path}")
+
+          data = json.loads(json_path.read_text() or "{}")
+          alerts = []
+          for site in data.get("site", []):
+            alerts.extend(site.get("alerts") or [])
+
+          risk_map = {"3": "High", "2": "Medium", "1": "Low", "0": "Informational"}
+          counts = Counter()
+          for alert in alerts:
+            risk_code = str(alert.get("riskcode") or alert.get("riskCode") or "").strip()
+            level = risk_map.get(risk_code)
+            if not level:
+              risk_desc = str(alert.get("riskdesc") or alert.get("riskDesc") or "").strip()
+              if risk_desc:
+                level = risk_desc.split()[0]
+            counts[level or "Unknown"] += 1
+
+          unknown = counts.pop("Unknown", 0)
+          total = sum(counts.values()) + unknown
+
+          summary_lines = [
+            f"- Target: {target}",
+            "- Alerts by risk: "
+            f"High {counts.get('High', 0)} | "
+            f"Medium {counts.get('Medium', 0)} | "
+            f"Low {counts.get('Low', 0)} | "
+            f"Informational {counts.get('Informational', 0)}",
+          ]
+          if unknown:
+            summary_lines.append(f"- Unknown severity entries: {unknown}")
+
+          try:
+            exit_code = int(exit_code_raw)
+          except ValueError:
+            exit_code = None
+
+          if counts.get("High", 0) or counts.get("Medium", 0):
+            summary_lines.append("- Findings: High/Medium alerts present; review the full report.")
+          elif total == 0:
+            summary_lines.append("- Findings: ZAP baseline reported no alerts.")
+          else:
+            summary_lines.append("- Findings: Only Low/Informational alerts reported; review as needed.")
+
+          if exit_code not in (None, 0):
+            summary_lines.append(f"- ZAP exit code: {exit_code} (alerts kept the job green)")
+
+          summary_lines.append(
+            f"- Reports: `{html_path.as_posix()}` / `{json_path.as_posix()}`"
+          )
+
+          summary_path.parent.mkdir(parents=True, exist_ok=True)
+          summary_path.write_text("\n".join(summary_lines) + "\n")
+          PY
+
+      - name: Attach summary to job summary
+        run: cat "${{ env.EVIDENCE_DIR }}/${{ env.SUMMARY_FILE }}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Update PR description with ZAP summary
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        env:
+          SUMMARY_PATH: ${{ env.EVIDENCE_DIR }}/${{ env.SUMMARY_FILE }}
+        with:
+          script: |
+            const fs = require('fs');
+            const summary = fs.readFileSync(process.env.SUMMARY_PATH, 'utf8').trim();
+            const markerStart = '<!-- zap-baseline-summary:start -->';
+            const markerEnd = '<!-- zap-baseline-summary:end -->';
+            const block = `${markerStart}\n### DAST (OWASP ZAP baseline)\n${summary}\n${markerEnd}`;
+
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+            });
+
+            let body = pr.body || '';
+            const regex = new RegExp(`${markerStart}[\\s\\S]*?${markerEnd}`);
+            if (regex.test(body)) {
+              body = body.replace(regex, block);
+            } else {
+              body = `${body}\n\n${block}`.trim();
+            }
+
+            await github.rest.pulls.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+              body,
+            });
+
+      - name: Upload ZAP artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-baseline-artifacts
+          path: |
+            ${{ env.EVIDENCE_DIR }}/${{ env.ZAP_HTML }}
+            ${{ env.EVIDENCE_DIR }}/${{ env.ZAP_JSON }}
+            ${{ env.EVIDENCE_DIR }}/${{ env.SUMMARY_FILE }}
+          if-no-files-found: error
+
+      - name: Stop service
+        if: always()
+        run: docker compose --profile dev down --volumes --remove-orphans
+        working-directory: ${{ github.workspace }}
