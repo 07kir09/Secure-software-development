@@ -84,24 +84,47 @@ jobs:
         id: zap
         run: |
           set +e
-          docker run --rm --network "${{ steps.compose-network.outputs.network }}" \
-            -v "${{ github.workspace }}/${{ env.EVIDENCE_DIR }}:/zap/wrk:rw" \
-            -w /zap/wrk \
-            "${{ env.ZAP_IMAGE }}" \
-            zap-baseline.py \
-            -t "http://app:${{ env.APP_PORT }}" \
-            -m 5 \
-            -I \
-            -r "/zap/wrk/${{ env.ZAP_HTML }}" \
-            -J "/zap/wrk/${{ env.ZAP_JSON }}" | tee "${{ env.EVIDENCE_DIR }}/zap_baseline.log"
-          status=${PIPESTATUS[0]}
+          LOG_PATH="${{ env.EVIDENCE_DIR }}/zap_baseline.log"
+          touch "$LOG_PATH"
+
+          run_zap() {
+            local network=$1
+            local target=$2
+            echo "Running ZAP on network=${network}, target=${target}" | tee -a "$LOG_PATH"
+            docker run --rm --network "$network" \
+              -v "${{ github.workspace }}/${{ env.EVIDENCE_DIR }}:/zap/wrk:rw" \
+              -w /zap/wrk \
+              "${{ env.ZAP_IMAGE }}" \
+              zap-baseline.py \
+              -t "$target" \
+              -m 5 \
+              -I \
+              -r "/zap/wrk/${{ env.ZAP_HTML }}" \
+              -J "/zap/wrk/${{ env.ZAP_JSON }}" 2>&1 | tee -a "$LOG_PATH"
+            return ${PIPESTATUS[0]}
+          }
+
+          STATUS=0
+          TARGET_USED="http://app:${{ env.APP_PORT }}"
+
+          run_zap "${{ steps.compose-network.outputs.network }}" "$TARGET_USED"
+          STATUS=$?
+
+          if [ $STATUS -ne 0 ]; then
+            echo "ZAP failed on compose network, retrying on host network against localhost..." | tee -a "$LOG_PATH"
+            TARGET_USED="http://localhost:${{ env.APP_PORT }}"
+            run_zap "host" "$TARGET_USED"
+            STATUS=$?
+          fi
+
           ls -l "${{ env.EVIDENCE_DIR }}" || true
-          echo "zap_exit_code=$status" >> "$GITHUB_OUTPUT"
+          echo "zap_exit_code=$STATUS" >> "$GITHUB_OUTPUT"
+          echo "target_url=$TARGET_USED" >> "$GITHUB_OUTPUT"
           exit 0
 
       - name: Build ZAP summary
         env:
-          TARGET_URL: http://app:${{ env.APP_PORT }}
+          TARGET_URL: ${{ steps.zap.outputs.target_url }}
           EVIDENCE_DIR: ${{ env.EVIDENCE_DIR }}
           ZAP_HTML: ${{ env.ZAP_HTML }}
           ZAP_JSON: ${{ env.ZAP_JSON }}
