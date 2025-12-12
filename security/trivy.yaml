@@ -1,0 +1,11 @@
+# Minimal Trivy configuration for vulnerability scanning
+scan:
+  scanners:
+    - vuln
+  severity:
+    - CRITICAL
+    - HIGH
+  timeout: 5m
+vuln:
+  ignore-unfixed: true
+format: "json"
