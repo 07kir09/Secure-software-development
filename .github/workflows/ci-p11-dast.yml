@@ -31,10 +31,7 @@ jobs:
     name: Run OWASP ZAP baseline
     runs-on: ubuntu-latest
     env:
-      COMPOSE_PROJECT_NAME: secdevapp
-      DOCKER_NETWORK: secdevapp_default
       APP_PORT: 8000
-      TARGET_URL: http://app:8000
       HEALTHCHECK_URL: http://localhost:8000/health
       EVIDENCE_DIR: EVIDENCE/P11
       ZAP_HTML: zap_baseline.html
@@ -56,6 +53,18 @@ jobs:
         run: docker compose --profile dev up --build -d app
         working-directory: ${{ github.workspace }}
 
+      - name: Detect compose network
+        id: compose-network
+        run: |
+          NET=$(docker compose ps -q app | head -n1 | xargs -I{} docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{ $k }}{{end}}' {} | tr -d '\n')
+          if [ -z "$NET" ]; then
+            echo "Failed to detect compose network" >&2
+            docker compose ps
+            exit 1
+          fi
+          echo "network=$NET" >> "$GITHUB_OUTPUT"
+          echo "Detected network: $NET"
+
       - name: Wait for service health
         run: |
           for i in {1..30}; do
@@ -75,12 +84,12 @@ jobs:
         id: zap
         run: |
           set +e
-          docker run --rm --network "${{ env.DOCKER_NETWORK }}" \
+          docker run --rm --network "${{ steps.compose-network.outputs.network }}" \
             -v "${{ github.workspace }}/${{ env.EVIDENCE_DIR }}:/zap/wrk:rw" \
             -w /zap/wrk \
             "${{ env.ZAP_IMAGE }}" \
             zap-baseline.py \
-            -t "${{ env.TARGET_URL }}" \
+            -t "http://app:${{ env.APP_PORT }}" \
             -m 5 \
             -I \
             -r "/zap/wrk/${{ env.ZAP_HTML }}" \
@@ -92,7 +101,7 @@ jobs:
 
       - name: Build ZAP summary
         env:
-          TARGET_URL: ${{ env.TARGET_URL }}
+          TARGET_URL: http://app:${{ env.APP_PORT }}
           EVIDENCE_DIR: ${{ env.EVIDENCE_DIR }}
           ZAP_HTML: ${{ env.ZAP_HTML }}
           ZAP_JSON: ${{ env.ZAP_JSON }}
