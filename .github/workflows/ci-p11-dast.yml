@@ -31,8 +31,10 @@ jobs:
     name: Run OWASP ZAP baseline
     runs-on: ubuntu-latest
     env:
+      COMPOSE_PROJECT_NAME: secdevapp
+      DOCKER_NETWORK: secdevapp_default
       APP_PORT: 8000
-      TARGET_URL: http://localhost:8000
+      TARGET_URL: http://app:8000
       HEALTHCHECK_URL: http://localhost:8000/health
       EVIDENCE_DIR: EVIDENCE/P11
       ZAP_HTML: zap_baseline.html
@@ -73,7 +75,7 @@ jobs:
         id: zap
         run: |
           set +e
-          docker run --rm --network host \
+          docker run --rm --network "${{ env.DOCKER_NETWORK }}" \
             -v "${{ github.workspace }}/${{ env.EVIDENCE_DIR }}:/zap/wrk:rw" \
             -w /zap/wrk \
             "${{ env.ZAP_IMAGE }}" \
@@ -81,9 +83,10 @@ jobs:
             -t "${{ env.TARGET_URL }}" \
             -m 5 \
             -I \
-            -r "${{ env.ZAP_HTML }}" \
-            -J "${{ env.ZAP_JSON }}"
-          status=$?
+            -r "/zap/wrk/${{ env.ZAP_HTML }}" \
+            -J "/zap/wrk/${{ env.ZAP_JSON }}" | tee "${{ env.EVIDENCE_DIR }}/zap_baseline.log"
+          status=${PIPESTATUS[0]}
+          ls -l "${{ env.EVIDENCE_DIR }}" || true
           echo "zap_exit_code=$status" >> "$GITHUB_OUTPUT"
           exit 0
 
@@ -210,6 +213,7 @@ jobs:
             ${{ env.EVIDENCE_DIR }}/${{ env.ZAP_HTML }}
             ${{ env.EVIDENCE_DIR }}/${{ env.ZAP_JSON }}
             ${{ env.EVIDENCE_DIR }}/${{ env.SUMMARY_FILE }}
+            ${{ env.EVIDENCE_DIR }}/zap_baseline.log
           if-no-files-found: error
 
       - name: Stop service
